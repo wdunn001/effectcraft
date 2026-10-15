@@ -133,6 +133,25 @@ fn query_value(name: &str) -> Option<String> {
     query().and_then(|p| p.get(name))
 }
 
+/// URL flags documented in packaging/web/README.md (`?webgl`, default WebGPU).
+fn web_wgpu_options() -> eframe::WgpuConfiguration {
+    use eframe::egui_wgpu::WgpuSetup;
+    use eframe::wgpu::Backends;
+    let mut config = eframe::WgpuConfiguration::default();
+    if !query_flag("webgl") {
+        return config;
+    }
+    if let WgpuSetup::CreateNew(setup) = &mut config.wgpu_setup {
+        setup.instance_descriptor.backends = Backends::GL;
+        setup.instance_descriptor.flags = setup
+            .instance_descriptor
+            .flags
+            .difference(eframe::wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL)
+            .with_env();
+    }
+    config
+}
+
 /// A session wired for the browser: media decoding from memory, expressions, scripting, Render
 /// Queue export to downloads, settings in browser storage, renders and analyses in workers.
 pub fn session() -> Session {
@@ -204,10 +223,12 @@ pub async fn start(canvas_id: String) -> Result<(), JsValue> {
     diskcache::init();
     storage::refresh();
     let runner = eframe::WebRunner::new();
+    let mut web_options = eframe::WebOptions::default();
+    web_options.wgpu_options = web_wgpu_options();
     runner
         .start(
             canvas,
-            eframe::WebOptions::default(),
+            web_options,
             Box::new(move |cc| {
                 CTX.with(|c| *c.borrow_mut() = Some(cc.egui_ctx.clone()));
                 // The page owns this shared presentation device; worker devices retain their
