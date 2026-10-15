@@ -1,11 +1,4 @@
-// Pilot: open the craft-runtime SharedWorker and speak craft-worker-host JSON.
-// Does not replace effectcraft `store` / `persist` yet — parallel integration only.
-//
-// Usage (optional, from the page after static assets load):
-//   const rt = effectcraftCraftRuntime.connect({ workerUrl: "craft-worker-host.js" });
-//   await rt.init({ app_id: "effectcraft", capabilities: ["gpu", "tier_store"] });
-//   await rt.storageFlush();
-
+// Pilot: craft-worker-host JSON over SharedWorker (apps) or DedicatedWorker (smoke page).
 const CRAFT_HOST_TYPES = new Set([
   "init",
   "storage_put",
@@ -18,22 +11,9 @@ function isCraftHostMessage(data) {
   return data && typeof data.type === "string" && CRAFT_HOST_TYPES.has(data.type);
 }
 
-/**
- * @param {{ workerUrl?: string }} [opts]
- */
-export function connect(opts = {}) {
-  // Web-root worker on CollabCraft (not under /effectcraft/).
-  const metaUrl =
-    typeof document !== "undefined"
-      ? document.querySelector('meta[name="craft-runtime-worker"]')?.content
-      : undefined;
-  const workerUrl = opts.workerUrl ?? metaUrl ?? "/craft-worker-host.js";
-  const worker = new SharedWorker(workerUrl, { name: "craft-runtime" });
-  const port = worker.port;
-
-  /** @type {Map<number, { resolve: Function, reject: Function, replies: object[] }>} */
+function buildClient(port) {
+  /** @type {Map<number, { resolve: Function, reject: Function }>} */
   const gpuWaiters = new Map();
-  let gpuSeq = 0;
 
   port.onmessage = (ev) => {
     const msg = ev.data;
@@ -52,7 +32,7 @@ export function connect(opts = {}) {
     }
   };
 
-  port.start();
+  if (typeof port.start === "function") port.start();
 
   function postHost(data) {
     if (!isCraftHostMessage(data)) {
@@ -102,9 +82,46 @@ export function connect(opts = {}) {
     },
     gpuJobs(batchId, jobs) {
       return new Promise((resolve, reject) => {
-        gpuWaiters.set(batchId, { resolve, reject, replies: [] });
+        gpuWaiters.set(batchId, { resolve, reject });
         port.postMessage({ type: "gpu_jobs", batch_id: batchId, jobs });
       });
     },
   };
+}
+
+function wrapDedicatedWorker(worker) {
+  const port = {
+    postMessage: (m) => worker.postMessage(m),
+    addEventListener: (type, fn) => worker.addEventListener(type, fn),
+    removeEventListener: (type, fn) => worker.removeEventListener(type, fn),
+    start: () => {},
+    set onmessage(fn) {
+      worker.onmessage = fn;
+    },
+  };
+  return port;
+}
+
+/**
+ * @param {{ workerUrl?: string, dedicated?: boolean }} [opts]
+ */
+export function connect(opts = {}) {
+  const metaUrl =
+    typeof document !== "undefined"
+      ? document.querySelector('meta[name="craft-runtime-worker"]')?.content
+      : undefined;
+  const smokePage =
+    typeof location !== "undefined" &&
+    /craft-runtime-smoke\.html$/i.test(location.pathname);
+  const dedicated = opts.dedicated ?? smokePage;
+
+  if (dedicated) {
+    const workerUrl = opts.workerUrl ?? "/craft-dedicated-worker.js";
+    const worker = new Worker(workerUrl);
+    return buildClient(wrapDedicatedWorker(worker));
+  }
+
+  const workerUrl = opts.workerUrl ?? metaUrl ?? "/craft-worker-host.js";
+  const worker = new SharedWorker(workerUrl, { name: "craft-runtime" });
+  return buildClient(worker.port);
 }
