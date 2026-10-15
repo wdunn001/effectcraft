@@ -5,6 +5,7 @@ function banner(text, ok) {
   const el = document.getElementById("status") || document.getElementById("loading");
   if (!el) return;
   el.className = ok ? "ok" : "err";
+  if (el.parentElement?.id === "loading" && ok) el.parentElement.querySelector("#status")?.classList.add("ok");
   el.textContent = text;
 }
 
@@ -20,7 +21,9 @@ export async function runCraftRuntimePilot() {
   return ready;
 }
 
-if (new URLSearchParams(location.search).has("craftRuntime")) {
+const smokePage = /craft-runtime-smoke\.html$/i.test(location.pathname);
+const smokeQuery = new URLSearchParams(location.search).has("craftRuntime");
+if (smokePage || smokeQuery) {
   runCraftRuntimePilot().catch((e) => {
     banner(`craft-runtime failed:\n${e?.stack || e}`, false);
     console.error(e);

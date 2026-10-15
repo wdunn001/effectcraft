@@ -8,6 +8,14 @@
   <meta name="description" content="EffectCraft: motion graphics and visual effects in the browser">
   <meta name="craft-runtime-worker" content="/craft-worker-host.js">
   <title>EffectCraft</title>
+  <script>
+    (function () {
+      if (!location.search.includes("craftRuntime")) return;
+      if (location.pathname.endsWith("craft-runtime-smoke.html")) return;
+      var q = location.search || "?craftRuntime=1";
+      location.replace("craft-runtime-smoke.html" + q + location.hash);
+    })();
+  </script>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon-256.png">
@@ -46,7 +54,6 @@
   <script type="module">
     import init, * as ec from "./effectcraft_web.js";
     const urlParams = new URLSearchParams(location.search);
-    const craftRuntimeSmoke = urlParams.has("craftRuntime");
     const t0 = performance.now();
     window.effectcraftLoad = {};
     // The agent / test API: the desktop control channel as promises (docs/web.md).
@@ -86,23 +93,10 @@
       workerFrameCheck: (params) => ec.workerFrameCheck(params ?? {}).then(JSON.parse),
     };
     // Offline start and install (PWA): the service worker caches the app's files.
-    if (
-      "serviceWorker" in navigator &&
-      !urlParams.has("nosw") &&
-      !craftRuntimeSmoke
-    ) {
+    if ("serviceWorker" in navigator && !urlParams.has("nosw")) {
       navigator.serviceWorker.register("sw.js").catch((e) => console.warn("service worker:", e));
     }
-    if (craftRuntimeSmoke) {
-      const canvas = document.getElementById("effectcraft_canvas");
-      if (canvas) canvas.style.display = "none";
-      const s = document.getElementById("status");
-      if (s) {
-        s.textContent =
-          "craft-runtime smoke only (EffectCraft wasm/WebGPU skipped; loading SharedWorker…)";
-      }
-      window.effectcraftLoad.craftRuntimeSmoke = true;
-    } else try {
+    try {
       // Compile once: the page and its render workers instantiate the same module.
       const wasmUrl = new URL("effectcraft_web_bg.wasm", location.href);
       let module;
@@ -123,6 +117,5 @@
       throw e;
     }
   </script>
-  <script type="module" src="craft-runtime-pilot.js"></script>
 </body>
 </html>
