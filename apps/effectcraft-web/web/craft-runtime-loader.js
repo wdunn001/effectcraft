@@ -22,8 +22,13 @@ function isCraftHostMessage(data) {
  * @param {{ workerUrl?: string }} [opts]
  */
 export function connect(opts = {}) {
-  const workerUrl = opts.workerUrl ?? "craft-worker-host.js";
-  const worker = new SharedWorker(workerUrl, { type: "module", name: "craft-runtime" });
+  // Web-root worker on CollabCraft (not under /effectcraft/).
+  const metaUrl =
+    typeof document !== "undefined"
+      ? document.querySelector('meta[name="craft-runtime-worker"]')?.content
+      : undefined;
+  const workerUrl = opts.workerUrl ?? metaUrl ?? "/craft-worker-host.js";
+  const worker = new SharedWorker(workerUrl, { name: "craft-runtime" });
   const port = worker.port;
 
   /** @type {Map<number, { resolve: Function, reject: Function, replies: object[] }>} */
