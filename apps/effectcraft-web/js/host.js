@@ -664,6 +664,17 @@ export function showDeviceLost(message, kept) {
       .execute("file.save", {})
       .catch(() => self.effectcraft.execute("file.saveAs", { path: "/Untitled Project.ecproj" }))
       .catch((e) => (text.textContent = `Saving failed: ${(e && e.message) || e}`));
+  const webgl = document.createElement("button");
+  webgl.textContent = "Reload with WebGL2";
+  webgl.onclick = () => {
+    try {
+      localStorage.setItem("effectcraft-prefer-webgl", "1");
+    } catch (_) {}
+    const q = new URLSearchParams(location.search);
+    q.set("webgl", "");
+    q.set("nogpuworkers", "");
+    location.replace(location.pathname + "?" + q.toString().replace(/=(&|$)/g, "$1") + location.hash);
+  };
   const reload = document.createElement("button");
   reload.textContent = "Reload";
   reload.onclick = async () => {
@@ -680,6 +691,7 @@ export function showDeviceLost(message, kept) {
     location.reload();
   };
   const buttons = document.createElement("div");
+  if (!location.search.includes("webgl")) buttons.append(webgl);
   buttons.append(save, reload);
   box.append(title, text, detail, buttons);
   document.body.append(box);
