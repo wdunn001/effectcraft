@@ -24,6 +24,8 @@
 
 pub mod store;
 
+mod craft_runtime_bridge;
+
 #[cfg(target_arch = "wasm32")]
 pub mod api;
 #[cfg(target_arch = "wasm32")]

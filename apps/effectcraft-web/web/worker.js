@@ -14,7 +14,36 @@ import init, * as ec from "./effectcraft_web.js";
 let ready = null;
 let queue = Promise.resolve();
 
+/** craft-worker-host JSON (SharedWorker protocol); distinct from EffectCraft `init` (module/base). */
+function isCraftRuntimeInit(m) {
+  return m.type === "init" && typeof m.app_id === "string";
+}
+
+const CRAFT_HOST_TYPES = new Set(["storage_put", "storage_flush", "gpu_jobs", "cancel"]);
+
+function isCraftRuntimeHost(m) {
+  return isCraftRuntimeInit(m) || CRAFT_HOST_TYPES.has(m.type);
+}
+
+function postCraftReplies(json) {
+  const replies = JSON.parse(json);
+  if (!Array.isArray(replies)) throw new Error("craftRuntimeHostMessage must return a JSON array");
+  for (const reply of replies) self.postMessage(reply);
+}
+
+async function handleCraftRuntime(m) {
+  if (typeof ec.craftRuntimeHostMessage !== "function") {
+    self.postMessage({ type: "error", message: "craft-runtime wasm glue not loaded" });
+    return;
+  }
+  postCraftReplies(ec.craftRuntimeHostMessage(JSON.stringify(m)));
+}
+
 async function handle(m) {
+  if (isCraftRuntimeHost(m)) {
+    await handleCraftRuntime(m);
+    return;
+  }
   if (m.type === "file") ec.workerFile(m.path, m.bytes);
   else if (m.type === "job") await ec.workerJob(m.json);
   else if (m.type === "frame") await ec.workerFrame(m.json);
@@ -25,6 +54,10 @@ self.onmessage = (e) => {
   if (m.type === "init") {
     ready = (async () => {
       await init({ module_or_path: m.module ?? new URL("effectcraft_web_bg.wasm", m.base) });
+      if (isCraftRuntimeInit(m)) {
+        await handleCraftRuntime(m);
+        return;
+      }
       ec.workerInit();
       if (m.frames) await ec.workerFrameInit(!!m.gpu);
       else await ec.workerJobInit(!!m.gpu);
