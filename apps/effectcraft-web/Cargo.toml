@@ -18,7 +18,8 @@ crate-type = ["cdylib", "rlib"]
 effectcraft-engine = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-craft-runtime = { git = "https://github.com/wdunn001/craft-libs.git", branch = "expand-craft-gpu-ecosystem", package = "craft-runtime" }
+# Lab pin until craft-runtime is on storytold/craft-libs main; use a rev, not a moving branch.
+craft-runtime = { git = "https://github.com/wdunn001/craft-libs.git", rev = "1d4ffc10b0714ebc113e9301a84ac59476e4a27e", package = "craft-runtime" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 effectcraft-host = { workspace = true }
