@@ -35,15 +35,42 @@ export async function runCraftRuntimePilot() {
     15000,
     "worker init",
   );
+
+  const mode = dedicated ? "DedicatedWorker" : "SharedWorker";
+  const parts = [`craft-runtime ready (${mode}, web-root worker)`];
+
+  // OPFS flush test (?flush=1)
   if (params.has("flush")) {
     await withTimeout(rt.storageFlush(), 15000, "storage_flush");
+    parts.push("storage_flush ok");
+  } else {
+    parts.push("Add ?flush=1 to test OPFS flush");
   }
-  const mode = dedicated ? "DedicatedWorker" : "SharedWorker";
-  banner(
-    `craft-runtime ready (${mode}, web-root worker).` +
-      (params.has("flush") ? " storage_flush ok." : " Add ?flush=1 to test OPFS flush."),
-    true,
-  );
+
+  // GPU batch test via worker (?jobs=<n>, default n=1) — craft-libs#9 SharedWorker jobs.
+  // Without wasm the worker stubs craft.noop outcomes; with wasm it routes through the bridge.
+  if (params.has("jobs")) {
+    const n = Math.max(1, parseInt(params.get("jobs"), 10) || 1);
+    const jobs = Array.from({ length: n }, () => ({
+      provider_id: "craft.noop",
+      params: [],
+      inputs: [],
+      outputs: [],
+    }));
+    const done = await withTimeout(rt.gpuJobs(1, jobs), 15000, "gpu_jobs");
+    parts.push(`gpu_batch_done (${done.outcomes?.length ?? 0}/${n} outcomes)`);
+  } else {
+    parts.push("Add ?jobs=1 to test GPU batch via worker");
+  }
+
+  // Cold folder hook — reads craftRuntimeColdFolders wasm export when the main app is running
+  // (returns [] on the smoke page; craft-libs#9 cold folder UI hook).
+  const cold = rt.coldFolders();
+  if (cold.length > 0) {
+    parts.push(`cold folders (need Reconnect): ${cold.join(", ")}`);
+  }
+
+  banner(parts.join(". "), true);
   return ready;
 }
 

@@ -86,6 +86,23 @@ function buildClient(port) {
         port.postMessage({ type: "gpu_jobs", batch_id: batchId, jobs });
       });
     },
+    /**
+     * Returns the names of remembered folders that have lost browser access ("cold").
+     * Reads the `craftRuntimeColdFolders` page-side wasm export when available; returns `[]`
+     * on the smoke page or when the main wasm has not yet initialized (craft-libs#9).
+     * @returns {string[]}
+     */
+    coldFolders() {
+      const fn = globalThis.craftRuntimeColdFolders;
+      if (typeof fn === "function") {
+        try {
+          return JSON.parse(fn());
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    },
   };
 }
 

@@ -297,3 +297,19 @@ impl Browser for WebBrowser {
         }
     }
 }
+
+/// Names of remembered folders that have lost browser access ("cold" — need Reconnect).
+///
+/// Consumed by the craft-runtime bridge to surface cold-tier folder state; also exposed as the
+/// [`craftRuntimeColdFolders`] wasm export so page-side JS hooks can query reconnect status
+/// without coupling to the egui session (craft-libs#9).
+pub fn cold_folder_names() -> Vec<String> {
+    state().disconnected.clone()
+}
+
+/// JSON array of remembered folder names that have lost browser access (cold tier).
+/// Returns `[]` when all opened folders have active browser grants.
+#[wasm_bindgen(js_name = craftRuntimeColdFolders)]
+pub fn craft_runtime_cold_folders() -> String {
+    serde_json::to_string(&cold_folder_names()).unwrap_or_else(|_| "[]".to_owned())
+}

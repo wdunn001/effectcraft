@@ -95,4 +95,37 @@ mod tests {
         let json = bridge.handle_worker_json(r#"{"type":"storage_flush"}"#);
         assert!(json.contains("storage_flushed"));
     }
+
+    /// Verifies the provider registry has the default providers by dispatching a two-job batch
+    /// containing both `craft.noop` and `craft.test.echo` in a single `gpu_jobs` round-trip.
+    /// This covers craft-libs#9 "gpu provider registry" and SharedWorker multi-job batches.
+    #[test]
+    fn gpu_provider_registry_multi_job_batch() {
+        let mut bridge = CraftRuntimeBridge::new();
+        // No init required; gpu_jobs dispatch does not depend on app_id being set.
+        let result = bridge.handle_worker_json(
+            r#"{"type":"gpu_jobs","batch_id":3,"jobs":[
+                {"provider_id":"craft.noop","params":[],"inputs":[],"outputs":[]},
+                {"provider_id":"craft.test.echo","params":[65,66],"inputs":[],"outputs":[]}
+            ]}"#,
+        );
+        assert!(result.contains("gpu_batch_done"), "expected gpu_batch_done: {result}");
+        assert!(result.contains("\"batch_id\":3"), "batch_id should round-trip: {result}");
+        // echo provider returns its params as data; noop has null data
+        assert!(result.contains("[65,66]"), "echo outcome should contain echoed params: {result}");
+    }
+
+    /// `craft.test.echo` echoes its param bytes as the outcome data field.
+    #[test]
+    fn gpu_provider_registry_echo_data_roundtrip() {
+        let mut bridge = CraftRuntimeBridge::new();
+        let result = bridge.handle_worker_json(
+            r#"{"type":"gpu_jobs","batch_id":4,"jobs":[
+                {"provider_id":"craft.test.echo","params":[72,101,108,108,111],"inputs":[],"outputs":[]}
+            ]}"#,
+        );
+        assert!(result.contains("gpu_batch_done"), "expected gpu_batch_done: {result}");
+        // "Hello" as bytes [72,101,108,108,111]
+        assert!(result.contains("[72,101,108,108,111]"), "echo should return param bytes: {result}");
+    }
 }
