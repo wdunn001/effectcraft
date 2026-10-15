@@ -13,7 +13,7 @@ export async function runCraftRuntimePilot() {
   const rt = connect();
   const ready = await rt.init({
     app_id: "effectcraft",
-    capabilities: ["gpu", "tier_store"],
+    capabilities: ["tier_store"],
   });
   await rt.storageFlush();
   banner(`craft-runtime ready (worker /craft-worker-host.js) batch=${ready.batch_id ?? "—"}`, true);

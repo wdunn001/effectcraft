@@ -45,6 +45,8 @@
   <div id="loading"><img src="favicon.svg" alt=""><div id="status">Loading EffectCraft…</div></div>
   <script type="module">
     import init, * as ec from "./effectcraft_web.js";
+    const urlParams = new URLSearchParams(location.search);
+    const craftRuntimeSmoke = urlParams.has("craftRuntime");
     const t0 = performance.now();
     window.effectcraftLoad = {};
     // The agent / test API: the desktop control channel as promises (docs/web.md).
@@ -84,10 +86,23 @@
       workerFrameCheck: (params) => ec.workerFrameCheck(params ?? {}).then(JSON.parse),
     };
     // Offline start and install (PWA): the service worker caches the app's files.
-    if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("nosw")) {
+    if (
+      "serviceWorker" in navigator &&
+      !urlParams.has("nosw") &&
+      !craftRuntimeSmoke
+    ) {
       navigator.serviceWorker.register("sw.js").catch((e) => console.warn("service worker:", e));
     }
-    try {
+    if (craftRuntimeSmoke) {
+      const canvas = document.getElementById("effectcraft_canvas");
+      if (canvas) canvas.style.display = "none";
+      const s = document.getElementById("status");
+      if (s) {
+        s.textContent =
+          "craft-runtime smoke only (EffectCraft wasm/WebGPU skipped; loading SharedWorker…)";
+      }
+      window.effectcraftLoad.craftRuntimeSmoke = true;
+    } else try {
       // Compile once: the page and its render workers instantiate the same module.
       const wasmUrl = new URL("effectcraft_web_bg.wasm", location.href);
       let module;
