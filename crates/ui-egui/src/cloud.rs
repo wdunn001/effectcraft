@@ -261,6 +261,31 @@ impl CloudApp for EffectcraftApp {
         Some("The project is saved as an EffectCraft project file (.ecproj) in the folder above.".to_owned())
     }
 
+    fn recents(&self) -> Vec<String> {
+        self.session.prefs.recent_projects.clone()
+    }
+
+    fn open_recent(&mut self, path: &str) {
+        let _ = self.session.execute("file.open", json!({"path": path}));
+    }
+
+    fn browse_local(&mut self) {
+        if let Some(spawn) = self.hooks.file_dialog_async.as_ref() {
+            let tx = self.dialog_answers.0.clone();
+            let answer = crate::DialogAnswer { command: "file.open".into(), key: "path", params: json!({}), paths: Vec::new() };
+            spawn(
+                crate::FileDialog::OpenProject,
+                Box::new(move |paths| {
+                    let _ = tx.send(crate::DialogAnswer { paths, ..answer });
+                }),
+            );
+            return;
+        }
+        if let Some(path) = self.hooks.pick_open_project.as_ref().and_then(|f| f()) {
+            let _ = self.session.execute("file.open", json!({"path": path}));
+        }
+    }
+
     fn style(&self, _ui: &Ui) -> craft_ui::cloud::CloudStyle {
         let t = &self.tokens;
         // EffectCraft has no `accent_soft` token; use a low-opacity accent fill.
@@ -289,7 +314,7 @@ pub enum CloudPage {
 pub fn modal(app: &mut EffectcraftApp, ctx: &egui::Context) {
     let Some(page) = app.cloud_page else { return };
     let title = match page {
-        CloudPage::Open => "Open from cloud",
+        CloudPage::Open => "Open",
         CloudPage::SaveAs => "Save as to cloud",
     };
     let mut close = false;
