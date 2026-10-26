@@ -135,10 +135,6 @@ sys-locale = "0.3"
 # storytold/craft-libs URL (the canonical origin is storytold/craft-libs rev
 # 289d562). Redirect them to the fork used by this workspace so both reach the
 # same crate objects and the type graph stays consistent.
-[patch."https://github.com/wdunn001/craft-libs"]
-craft-cloud = { path = "../gh-craft-libs/crates/cloud" }
-craft-ui = { path = "../gh-craft-libs/crates/ui" }
-
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
@@ -228,6 +224,3 @@ codegen-units = 1
 hayro-syntax = {git = "https://github.com/wdunn001/craft-libs", branch = "quasarke", version = "=0.7.2"}
 
 
-[patch."https://github.com/wdunn001/craft-libs"]
-craft-ui = { path = "../gh-craft-libs/crates/ui" }
-craft-cloud = { path = "../gh-craft-libs/crates/cloud" }
