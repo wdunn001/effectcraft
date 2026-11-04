@@ -21,6 +21,7 @@ pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
 pub mod audio;
 pub mod automation;
 pub mod bench;
+pub mod cloud;
 pub mod color_picker;
 pub mod control;
 pub mod credits;
@@ -385,6 +386,10 @@ pub struct EffectcraftApp {
     pub(crate) template_thumbs: std::collections::HashMap<String, Option<egui::TextureHandle>>,
     /// Home ▸ Templates: the gallery, and the user template files it was listed from.
     pub(crate) template_list: Option<(Vec<String>, Vec<effectcraft_engine::templates::TemplateInfo>)>,
+    /// The app's optional connection to a cloud provider (see [`cloud`]). `None` until a real
+    /// backend exists to construct, which hides every cloud menu item, account badge and share
+    /// dialog this would back.
+    pub cloud: cloud::CloudState,
 }
 
 /// The saved workspaces in the settings store ([`effectcraft_engine::config::ConfigStore`]).
