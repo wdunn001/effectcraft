@@ -126,6 +126,7 @@ impl EffectcraftApp {
             template_thumbs: Default::default(),
             template_list: None,
             updates_rt: updates_ui::Runtime::default(),
+            cloud: cloud::CloudState::default(),
         }
         .with_ui_commands()
     }
