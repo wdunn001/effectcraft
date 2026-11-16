@@ -14,6 +14,14 @@
 //! [`CloudState::is_available`], so none of them appear until something calls
 //! [`CloudState::connect`] with a real [`CloudBackend`]. When `storytold/craft-libs#160` lands,
 //! this module is expected to be replaced by that crate's contract, not extended.
+//!
+//! A pre-RFC branch also had a keyed-invite open on web startup, redeeming a link
+//! (`?invite` with a guest cookie) before the app constructed anything, through
+//! `craft_cloud_client::invite`. That redemption step happens before a [`CloudBackend`] is
+//! connected. No account exists yet to call a trait method on. `storytold/craft-libs#160`
+//! has not yet settled how (or whether) it models deep-link redemption. Expressing this flow
+//! through [`CloudBackend`] as defined here would mean guessing at that shape. This module
+//! leaves the flow out and defers it to a follow-up once the real contract exists.
 
 use std::fmt;
 
