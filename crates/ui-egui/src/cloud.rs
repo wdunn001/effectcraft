@@ -1,190 +1,147 @@
-//! A local, self-contained seam for a future cloud provider.
+//! Wiring for `craft_ui::cloud`'s vendor-neutral Open/Save/Share contract
+//! (`storytold/craft-libs#160`, `storytold/effectcraft#1623`).
 //!
-//! `storytold/craft-libs#160` is expected to add a `cloud` feature to `craft-ui` and a
-//! `craft-cloud` crate with a shared `CloudBackend`/`CloudApp` contract every Craft app can take
-//! Open, Save and Share through. Until that lands, this module defines a small trait of the same
-//! shape, owned entirely by this crate, so EffectCraft's own code has somewhere to plug a backend
-//! in later without depending on a personal fork (`wdunn001/craft-libs`) or a personal service
-//! (`wdunn001/collab-craft`) that the project doesn't host or review
-//! (see `storytold/effectcraft#1623` and the review on `storytold/designcraft#878`).
+//! [`EffectcraftApp`] implements [`craft_ui::cloud::CloudApp`] in full, so the contract's own
+//! gating, conflict handling and account-generation fencing apply exactly as every other Craft
+//! app gets them. No part of that implementation names a provider, and nothing in this crate
+//! constructs one: [`EffectcraftApp::new`](super::EffectcraftApp::new) always starts with
+//! [`CloudFiles::default`], which has no backend connected. [`craft_ui::cloud::available`] is
+//! `false` until something calls [`CloudFiles::connect`], and this crate never does.
 //!
-//! No backend ships from this crate: [`EffectcraftApp::new`](super::EffectcraftApp::new) always
-//! starts with [`CloudState::default`], which has none connected. Every cloud menu item, account
-//! badge and share dialog this contract would back is built conditionally on
-//! [`CloudState::is_available`], so none of them appear until something calls
-//! [`CloudState::connect`] with a real [`CloudBackend`]. When `storytold/craft-libs#160` lands,
-//! this module is expected to be replaced by that crate's contract, not extended.
+//! No cloud UI is wired in this app yet: no menu item, account badge, Open/Save page or share
+//! dialog is drawn anywhere. There is nothing to hide behind [`craft_ui::cloud::available`],
+//! because nothing offers it in the first place. [`can_save`] exists so a future control has a
+//! correct guard ready to call, documented and tested, before it is added; see the regression
+//! test on `craft_ui::cloud::save` in `tests/it/cloud_files.rs` for why that guard is load
+//! bearing and not merely tidy.
 //!
-//! A pre-RFC branch also had a keyed-invite open on web startup, redeeming a link
-//! (`?invite` with a guest cookie) before the app constructed anything, through
-//! `craft_cloud_client::invite`. That redemption step happens before a [`CloudBackend`] is
-//! connected. No account exists yet to call a trait method on. `storytold/craft-libs#160`
-//! has not yet settled how (or whether) it models deep-link redemption. Expressing this flow
-//! through [`CloudBackend`] as defined here would mean guessing at that shape. This module
-//! leaves the flow out and defers it to a follow-up once the real contract exists.
+//! The project this app opens and saves has one document per run (`active` always answers
+//! `Some(0)`): [`CloudApp::open_bytes`] and [`CloudApp::encode`] go through the engine's
+//! `file.open` (its `text` parameter) and `file.toJson` commands, the same project reader and
+//! writer every other open and save already uses, just handed bytes instead of a path.
+//!
+//! A pre-RFC branch (`quasarke`, never merged) opened a keyed invite link on EffectCraft's web
+//! startup through `craft_cloud_client::invite`, a personal fork's API with nothing like it in
+//! this contract. The contract half of that handoff is settled and wired here: the apps crate's
+//! landing hook calls [`CloudFiles::as_guest`] and [`CloudApp::open_bytes`] exactly as the
+//! contract's own doc comment describes ("called once, before anything is drawn, by whatever
+//! landed them here"). Only the transport, fetching the invited bytes from a service, stays
+//! deferred: `apps/effectcraft-web/src/invite.rs` states a small seam for it with no
+//! implementation, because no storytold-hosted service exists yet to implement it against.
 
-use std::fmt;
+use craft_cloud::EntryKind;
+// Re-exported: a host (the apps crates' startup code, e.g. `apps/effectcraft-web/src/invite.rs`)
+// reaches the trait through this crate alone, with no direct `craft-ui` dependency of its own.
+pub use craft_ui::cloud::CloudApp;
+use craft_ui::cloud::{CloudFiles, Destination, DocumentKind};
+use egui::{Color32, Painter, Rect};
+use serde_json::{Value, json};
 
-/// Whether a [`Entry`] names a file or a folder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntryKind {
-    File,
-    Folder,
+use crate::EffectcraftApp;
+
+/// What EffectCraft's documents are, for the Open page's file list and the Save As page's
+/// default extension. One `const`, per [`DocumentKind`]'s own doc comment.
+const KIND: DocumentKind = DocumentKind { extensions: &["ecproj", "ecprojx"], mimes: &["application/json"], noun: "project", default_extension: "ecproj" };
+
+/// Whether a cloud save has somewhere safe to go.
+///
+/// `craft_ui::cloud::save` and `save_as` do not check this themselves: both set
+/// [`CloudFiles`]'s `busy` before calling [`craft_ui::cloud::submit`], and `submit` is a
+/// silent no-op with no backend connected, so `busy` then never clears (see the regression
+/// test `calling_save_with_no_backend_wedges_busy_forever` in `tests/it/cloud_files.rs`). A
+/// host must call this, not just [`craft_ui::cloud::available`] alone, before offering a
+/// control that calls either: a backend can be wired with nobody signed in, or signed in with
+/// no provider linked yet, and [`craft_ui::cloud::has_target`]/`save`/`save_as` all assume a
+/// writable target already exists.
+pub fn can_save<A: CloudApp>(app: &A) -> bool {
+    craft_ui::cloud::available(app) && app.cloud().account.as_ref().is_some_and(|account| account.provider_linked)
 }
 
-/// One file or folder a [`CloudBackend`] lists.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Entry {
-    /// The provider's id for this entry, stable across renames and moves.
-    pub id: String,
-    /// The display name, with extension.
-    pub name: String,
-    /// The folder path it lives in, provider-relative.
-    pub path: String,
-    pub kind: EntryKind,
-    /// Whether the signed-in account can write to this entry.
-    pub writable: bool,
-}
-
-/// A link a [`CloudBackend`] mints for sharing an [`Entry`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShareLink {
-    pub url: String,
-    /// Whether the link grants edit access, as opposed to read-only.
-    pub can_edit: bool,
-}
-
-/// What a cloud provider offers a Craft app: list, open, save and share, with no vendor and no
-/// transport detail leaking into the app. Mirrors the shape `craft_cloud`'s contract is expected
-/// to take once `storytold/craft-libs#160` lands.
-pub trait CloudBackend: fmt::Debug + Send + Sync {
-    /// A short, non-secret label for the account menu (for example `"name@host"`).
-    fn account_label(&self) -> String;
-
-    /// Entries in `folder`, or the root's entries when `folder` is `None`.
-    fn list(&self, folder: Option<&str>) -> Result<Vec<Entry>, String>;
-
-    /// The current bytes of `entry`.
-    fn open(&self, entry: &Entry) -> Result<Vec<u8>, String>;
-
-    /// Writes `bytes` as `name` in the root folder, creating or overwriting it, and returns the
-    /// saved entry.
-    fn save(&self, name: &str, bytes: &[u8]) -> Result<Entry, String>;
-
-    /// Mints a share link for `entry`.
-    fn share(&self, entry: &Entry) -> Result<ShareLink, String>;
-}
-
-/// The app's optional connection to a cloud provider. Defaults to no backend connected, which is
-/// the only state this crate ever ships: nothing here constructs a [`CloudBackend`].
-#[derive(Default)]
-pub struct CloudState {
-    backend: Option<Box<dyn CloudBackend>>,
-}
-
-impl fmt::Debug for CloudState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CloudState").field("connected", &self.backend.is_some()).finish()
-    }
-}
-
-impl CloudState {
-    /// Connects a real backend. Nothing in this crate calls this; it exists for a future host
-    /// (or a test) to call once a [`CloudBackend`] implementation exists.
-    pub fn connect(&mut self, backend: Box<dyn CloudBackend>) {
-        self.backend = Some(backend);
+impl CloudApp for EffectcraftApp {
+    fn cloud(&self) -> &CloudFiles {
+        &self.cloud
     }
 
-    /// Drops the connected backend, if any.
-    pub fn disconnect(&mut self) {
-        self.backend = None;
+    fn cloud_mut(&mut self) -> &mut CloudFiles {
+        &mut self.cloud
     }
 
-    /// Whether a backend is connected. The cloud menu items, account badge and share dialog this
-    /// contract would back are built only when this is `true`.
-    pub fn is_available(&self) -> bool {
-        self.backend.is_some()
+    fn kind(&self) -> DocumentKind {
+        KIND
     }
 
-    /// The connected backend, if any.
-    pub fn backend(&self) -> Option<&dyn CloudBackend> {
-        self.backend.as_deref()
+    /// One document per run: this app has no concept of a second one open at once, so there is
+    /// always exactly one, never none.
+    fn active(&self) -> Option<u64> {
+        Some(0)
     }
 
-    /// The account label to show in the account menu, if a backend is connected.
-    pub fn account_label(&self) -> Option<String> {
-        self.backend.as_deref().map(CloudBackend::account_label)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Debug, Default)]
-    struct MockBackend {
-        entries: Vec<Entry>,
+    fn title(&self, _uid: u64) -> String {
+        crate::panels::unsaved::project_name(self)
     }
 
-    impl CloudBackend for MockBackend {
-        fn account_label(&self) -> String {
-            "mock@example.test".to_owned()
+    fn open_bytes(&mut self, name: &str, bytes: Vec<u8>) -> Result<Option<u64>, String> {
+        let text = String::from_utf8(bytes).map_err(|_| format!("{name} is not a text project file"))?;
+        self.session.execute("file.open", json!({"text": text})).map_err(|e| e.to_string())?;
+        Ok(Some(0))
+    }
+
+    fn encode(&mut self, _uid: u64, into: Destination<'_>) -> Result<Vec<u8>, String> {
+        let extension = into.extension();
+        if !extension.is_empty() && !self.kind().extensions.contains(&extension.as_str()) {
+            return Err(format!("EffectCraft writes .{} project files, not .{extension}", self.kind().default_extension));
         }
+        let answer = self.session.execute("file.toJson", json!({})).map_err(|e| e.to_string())?;
+        let text = answer.get("text").and_then(Value::as_str).ok_or_else(|| "file.toJson answered with no text".to_owned())?;
+        Ok(text.as_bytes().to_vec())
+    }
 
-        fn list(&self, _folder: Option<&str>) -> Result<Vec<Entry>, String> {
-            Ok(self.entries.clone())
-        }
+    /// Never runs: a reload replaces the one document in place (`into` and the freshly opened
+    /// uid are always both `Some(0)`, so `craft_ui::cloud`'s `old != new` guard never holds).
+    /// Kept only because the trait has no default for a host with more than one document.
+    fn close(&mut self, _uid: u64) {}
 
-        fn open(&self, entry: &Entry) -> Result<Vec<u8>, String> {
-            self.entries.iter().find(|e| e.id == entry.id).map(|_| b"mock bytes".to_vec()).ok_or_else(|| "not found".to_owned())
-        }
+    fn mark_saved(&mut self, _uid: u64) {
+        self.session.mark_saved();
+    }
 
-        fn save(&self, name: &str, _bytes: &[u8]) -> Result<Entry, String> {
-            Ok(Entry { id: "new".into(), name: name.to_owned(), path: "/".into(), kind: EntryKind::File, writable: true })
-        }
+    fn sharing(&mut self) -> &mut craft_ui::share::ShareDialog {
+        &mut self.share
+    }
 
-        fn share(&self, entry: &Entry) -> Result<ShareLink, String> {
-            Ok(ShareLink { url: format!("https://example.test/s/{}", entry.id), can_edit: false })
+    fn presence(&mut self) -> &mut craft_ui::presence::PresenceBar {
+        &mut self.presence
+    }
+
+    /// A plain folder/file glyph. No cloud page draws a file list yet, so this never runs; it
+    /// exists only to satisfy the trait with something that will not look broken if one ever
+    /// does, without reaching into this app's own icon atlas for a provider-neutral contract.
+    fn paint_icon(&self, painter: &Painter, rect: Rect, kind: EntryKind, colour: Color32) {
+        let _ = match kind {
+            EntryKind::Folder => painter.rect_filled(rect, 3.0, colour.gamma_multiply(0.35)),
+            EntryKind::File => painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.3, colour), egui::StrokeKind::Middle),
+        };
+    }
+
+    /// Opens `url` in the user's browser through the egui context the last tick cached
+    /// (`EffectcraftApp::tick`); a no-op before the first tick, which never matters since
+    /// nothing in this crate calls a cloud command before one runs.
+    fn open_url(&self, url: &str) {
+        if let Some(ctx) = &self.egui_ctx {
+            ctx.open_url(egui::OpenUrl::new_tab(url));
         }
     }
 
-    #[test]
-    fn no_backend_by_default() {
-        let state = CloudState::default();
-        assert!(!state.is_available());
-        assert!(state.backend().is_none());
-        assert_eq!(state.account_label(), None);
+    fn say(&mut self, text: String) {
+        crate::panels::forms::info(self, "EffectCraft", &text);
     }
 
-    #[test]
-    fn connecting_a_backend_makes_it_available() {
-        let mut state = CloudState::default();
-        state.connect(Box::new(MockBackend::default()));
-        assert!(state.is_available());
-        assert_eq!(state.account_label(), Some("mock@example.test".to_owned()));
+    fn toast(&mut self, text: String) {
+        let now = self.now();
+        self.toast = Some((text, now));
     }
 
-    #[test]
-    fn disconnecting_hides_it_again() {
-        let mut state = CloudState::default();
-        state.connect(Box::new(MockBackend::default()));
-        state.disconnect();
-        assert!(!state.is_available());
-    }
-
-    #[test]
-    fn mock_backend_round_trips_list_open_save_share() {
-        let entry = Entry { id: "1".into(), name: "a.ecproj".into(), path: "/".into(), kind: EntryKind::File, writable: true };
-        let backend = MockBackend { entries: vec![entry.clone()] };
-        let mut state = CloudState::default();
-        state.connect(Box::new(backend));
-        let listed = state.backend().expect("connected").list(None).expect("list");
-        assert_eq!(listed, vec![entry.clone()]);
-        let bytes = state.backend().expect("connected").open(&entry).expect("open");
-        assert_eq!(bytes, b"mock bytes");
-        let saved = state.backend().expect("connected").save("b.ecproj", b"data").expect("save");
-        assert_eq!(saved.name, "b.ecproj");
-        let link = state.backend().expect("connected").share(&entry).expect("share");
-        assert!(link.url.contains(&entry.id));
+    fn app_name(&self) -> &str {
+        "EffectCraft"
     }
 }

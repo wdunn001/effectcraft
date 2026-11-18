@@ -42,6 +42,8 @@ pub mod files;
 #[cfg(target_arch = "wasm32")]
 pub mod frames;
 #[cfg(target_arch = "wasm32")]
+pub mod invite;
+#[cfg(target_arch = "wasm32")]
 pub mod persist;
 #[cfg(target_arch = "wasm32")]
 pub mod storage;

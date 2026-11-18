@@ -168,7 +168,7 @@ fn query_flag(name: &str) -> bool {
     query().is_some_and(|p| p.has(name))
 }
 
-fn query_value(name: &str) -> Option<String> {
+pub(crate) fn query_value(name: &str) -> Option<String> {
     query().and_then(|p| p.get(name))
 }
 
@@ -322,6 +322,9 @@ pub async fn start(canvas_id: String) -> Result<(), JsValue> {
                     app.offer_recovery(r);
                 }
                 install_hooks(&mut app);
+                // `?invite=<token>`: detected and reported; never opened yet (see `invite`'s
+                // module doc comment for why `transport` is always `None` here).
+                crate::invite::start(&mut app, None);
                 // Viewer frames render in frame workers (`?frameworkers=N`, 0 or `?noworkers`:
                 // on the page's thread), each on its own WebGPU device where the browser has
                 // WebGPU in workers (`?nogpuworkers`: their CPU).

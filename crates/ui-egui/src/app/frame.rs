@@ -212,6 +212,12 @@ impl EffectcraftApp {
         // Frames and worker completions wake the app even while it is hidden.
         self.frames.set_context(ctx);
         updates_ui::tick(self, ctx);
+        // Cached for `cloud::CloudApp::open_url`, which the contract calls with no context of
+        // its own.
+        self.egui_ctx = Some(ctx.clone());
+        // Drains the cloud backend's answers (see `cloud` module docs). A no-op until something
+        // calls `self.cloud.connect`, which nothing in this crate does.
+        craft_ui::cloud::pump(self, ctx);
         if self.session.render_job.is_some() {
             self.session.poll_render();
             ctx.request_repaint_after(std::time::Duration::from_millis(100));

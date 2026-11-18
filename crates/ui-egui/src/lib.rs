@@ -505,10 +505,21 @@ pub struct EffectcraftApp {
     pub(crate) template_thumbs: std::collections::HashMap<String, Option<egui::TextureHandle>>,
     /// Home ▸ Templates: the gallery, and the user template files it was listed from.
     pub(crate) template_list: Option<(Vec<String>, Vec<effectcraft_engine::templates::TemplateInfo>)>,
-    /// The app's optional connection to a cloud provider (see [`cloud`]). `None` until a real
-    /// backend exists to construct, which hides every cloud menu item, account badge and share
-    /// dialog this would back.
-    pub cloud: cloud::CloudState,
+    /// This app's half of `craft_ui::cloud`'s Open/Save/Share contract (see [`cloud`]). No
+    /// backend is ever connected by this crate, which is what keeps every cloud menu item,
+    /// account badge and share dialog this would back absent (there are none drawn yet either).
+    pub cloud: craft_ui::cloud::CloudFiles,
+    /// The share dialog [`cloud::CloudApp::sharing`] hands back. Never opened: nothing in this
+    /// crate calls `craft_ui::share::ShareDialog::open`, since there is no document list to open
+    /// it from yet.
+    pub(crate) share: craft_ui::share::ShareDialog,
+    /// Who else is in the document, for [`cloud::CloudApp::presence`]. Never shown a peer: no
+    /// backend ever reports one.
+    pub(crate) presence: craft_ui::presence::PresenceBar,
+    /// The latest tick's egui context, cached for [`cloud::CloudApp::open_url`], which the
+    /// contract calls with no context of its own to call `Context::open_url` through. `None`
+    /// before the first tick.
+    pub(crate) egui_ctx: Option<egui::Context>,
 }
 
 /// The saved workspaces in the settings store ([`effectcraft_engine::config::ConfigStore`]).

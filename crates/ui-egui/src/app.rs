@@ -126,7 +126,10 @@ impl EffectcraftApp {
             template_thumbs: Default::default(),
             template_list: None,
             updates_rt: updates_ui::Runtime::default(),
-            cloud: cloud::CloudState::default(),
+            cloud: craft_ui::cloud::CloudFiles::default(),
+            share: craft_ui::share::ShareDialog::default(),
+            presence: craft_ui::presence::PresenceBar::default(),
+            egui_ctx: None,
         }
         .with_ui_commands()
     }

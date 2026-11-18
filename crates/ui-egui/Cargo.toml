@@ -11,7 +11,10 @@ workspace = true
 
 [dependencies]
 craft-mime = { workspace = true }
-craft-ui = { workspace = true }
+craft-ui = { workspace = true, features = ["cloud"] }
+# The vendor-neutral cloud contract craft-ui's cloud feature draws on, for the Entry/Capability
+# types this crate's cloud wiring passes through. No IO here, so this stays wasm32-buildable.
+craft-cloud = { workspace = true }
 craft-quit = { workspace = true, features = ["egui"] }
 effectcraft-time = { workspace = true }
 effectcraft-geom = { workspace = true }
@@ -67,6 +70,11 @@ effectcraft-host = { workspace = true }
 effectcraft-media = { workspace = true }
 exr = { workspace = true }
 tempfile = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# The reference CloudBackend this crate's cloud tests connect; see the workspace comment on the
+# craft-cloud-local pin. Its own tests use std::thread, so this stays out of the wasm32 dev build.
+craft-cloud-local = { workspace = true }
 
 [build-dependencies]
 serde_json = { workspace = true }
