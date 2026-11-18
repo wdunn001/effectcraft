@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::{CommandSpec, always, b_p, bad, str_p};
 use crate::sequence::{SequenceOptions, Source};
-use crate::{EngineError, Result, Session, cmd};
+use crate::{EngineError, Result, Session, cmd, query};
 
 fn has_path(s: &Session) -> std::result::Result<(), String> {
     if s.path.is_some() { Ok(()) } else { Err("the project has not been saved yet".into()) }
@@ -41,7 +41,13 @@ fn demo(s: &mut Session, _: &Value) -> Result<Value> {
 }
 
 pub(crate) fn open(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = str_p(p, "path").ok_or_else(|| bad("file.open", "missing `path`"))?;
+    // `text`: a project handed over as bytes rather than a disk path (a document a cloud backend
+    // opened; see `effectcraft_ui_egui::cloud`). It gets no stored path, footage with no absolute
+    // path stays unresolved, and it joins no recent-files list: none of those name a real file.
+    if let Some(text) = str_p(p, "text") {
+        return open_text(s, text);
+    }
+    let path = str_p(p, "path").ok_or_else(|| bad("file.open", "missing `path` or `text`"))?;
     let bytes = s.services.read_file(path).map_err(|e| EngineError::Other(format!("cannot read {path}: {e}")))?;
     let text = String::from_utf8(bytes).map_err(|_| EngineError::Other("not a text project file".into()))?;
     // XML copies (File ▸ Save a Copy As XML…) open like the JSON project.
@@ -56,6 +62,32 @@ pub(crate) fn open(s: &mut Session, p: &Value) -> Result<Value> {
     s.stored_paths.add(&s.project, Some(path));
     s.restore_view(&effectcraft_project::saved_view(&text));
     s.note_project_path(path);
+    report_open(s, &text, &refused, repaired, Some(path.to_string()))
+}
+
+/// Opens a project from text handed over in memory, with no disk path behind it: a document a
+/// cloud backend read as bytes (`effectcraft_ui_egui::cloud`) rather than one this process read
+/// from a file. Footage with no absolute path stays unresolved, since there is no project folder
+/// to resolve a relative one against, and the project joins no recent-files list and gets no
+/// stored path: `file.save` has nowhere to go until `file.saveAs`, or the cloud, gives it one.
+fn open_text(s: &mut Session, text: &str) -> Result<Value> {
+    let owned = if crate::xml_project::is_xml(text) { crate::xml_project::from_xml(text).map_err(EngineError::Other)? } else { text.to_owned() };
+    let (mut proj, repaired) = Project::from_json_repaired(&owned).map_err(|e| EngineError::Other(format!("not a project EffectCraft can open: {e}")))?;
+    let refused = crate::doc_path::resolve_footage(&mut proj, None);
+    s.replace_project(proj, None);
+    s.restore_view(&effectcraft_project::saved_view(&owned));
+    report_open(s, &owned, &refused, repaired, None)
+}
+
+/// The tail [`open`] and [`open_text`] share: the toasts for a repaired, footage-refusing or
+/// newer-saved-by project, the lazy footage check, and the command's result.
+fn report_open(
+    s: &mut Session,
+    text: &str,
+    refused: &[(ItemId, String, crate::doc_path::NotFollowed)],
+    repaired: Vec<String>,
+    path: Option<String>,
+) -> Result<Value> {
     // Values past the limits (a corrupt or hostile file) were brought within them (#788).
     if !repaired.is_empty() {
         let more = repaired.len().saturating_sub(3);
@@ -65,10 +97,10 @@ pub(crate) fn open(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some((_, first, why)) = refused.first() {
         let n = refused.len();
-        s.toast(format!("{n} footage item{} marked missing: {}.", if n == 1 { "" } else { "s" }, crate::doc_path::refusal(first, *why)));
+        s.toast(format!("{n} footage item{} marked missing: {}.", if n == 1 { "" } else { "s" }, crate::doc_path::refusal(first, why.clone())));
     }
     // Written by a newer EffectCraft: what this version doesn't know would be lost on saving.
-    let saved_by = effectcraft_project::saved_by(&text);
+    let saved_by = effectcraft_project::saved_by(text);
     if let Some(v) = saved_by.as_deref().filter(|v| effectcraft_project::is_newer_version(v, effectcraft_project::APP_VERSION)) {
         s.toast(format!(
             "This project was saved by EffectCraft {v}, newer than this version ({}). Settings this version doesn't know are lost if you save it.",
@@ -81,6 +113,16 @@ pub(crate) fn open(s: &mut Session, p: &Value) -> Result<Value> {
         crate::footage_check::start(s, None, false)?;
     }
     Ok(json!({"path": path, "savedBy": saved_by, "repaired": repaired}))
+}
+
+/// The active project's current bytes, in the same JSON [`file_text`] would write to an
+/// `.ecproj` path: a document a cloud backend is about to save (`effectcraft_ui_egui::cloud`)
+/// rather than one this process is about to write to a file. Never XML: a cloud document has no
+/// path extension to decide that from, and craft-cloud documents are read back by this same
+/// command, which only ever understands the JSON form.
+fn to_json(s: &mut Session, _: &Value) -> Result<Value> {
+    let text = s.project.to_file_json_with_view(&s.saved_view(), s.prefs.project.compact_project_files)?;
+    Ok(json!({"text": text}))
 }
 
 /// The project file's text for `path`: `.ecproj` JSON, or XML for `.ecprojx` / `.xml` (a
@@ -802,7 +844,8 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("file.newProject", "New Project", ["File", "New"], Some("Cmd+Alt+N"), "{}", always, new_project),
         cmd!("file.openDemoProject", "Open Demo Project", ["Help"], None, "{}", always, demo),
-        cmd!("file.open", "Open Project...", ["File"], Some("Cmd+O"), "{path}", always, open),
+        cmd!("file.open", "Open Project...", ["File"], Some("Cmd+O"), "{path?, text?: the project JSON in memory, no disk file}", always, open),
+        query!("file.toJson", "Project as JSON", "{}", to_json),
         cmd!("file.save", "Save", ["File"], Some("Cmd+S"), "{path?}", always, save),
         cmd!("file.saveAs", "Save As...", ["File", "Save As"], Some("Cmd+Shift+S"), "{path}", always, save_as),
         cmd!("file.incrementAndSave", "Increment and Save", ["File"], Some("Cmd+Alt+Shift+S"), "{}", has_path, increment_save),
